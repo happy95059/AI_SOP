@@ -23,8 +23,10 @@ from .config import (
     TrackingConfig,
     RegionConfig,
     RTSPConfig,
+    SOPConfig,
     get_device,
 )
+from .sop import SOPSystem
 
 # YOLO 模組
 try:
@@ -105,6 +107,15 @@ class VideoWorker:
         # YOLO 模型
         self._yolo_model = None
         self._pose_model = None
+        
+        # SOP 流程偵測系統
+        self._sop_system: Optional[SOPSystem] = None
+        if SOPConfig.ENABLED:
+            self._sop_system = SOPSystem()
+        
+        # SOP 事件佇列（供 WebSocket 消費）
+        self._sop_events: list = []
+        self._sop_events_lock = threading.Lock()
         
         # 狀態
         self._is_running = False
@@ -513,6 +524,19 @@ class VideoWorker:
         if region_counts:
             self._draw_center_top_summary(display_frame, region_counts)
         
+        # SOP 流程偵測
+        if self._sop_system is not None:
+            hand_centers = self._extract_hand_centers(frame, results_hands_list)
+            sop_state, sop_events = self._sop_system.process_frame(
+                results_yolo, hand_centers
+            )
+            # 儲存事件供外部消費
+            if sop_events:
+                with self._sop_events_lock:
+                    self._sop_events.extend(sop_events)
+            # 在畫面上顯示 SOP 狀態
+            self._draw_sop_overlay(display_frame, sop_state)
+        
         # 繪製手部
         if self.use_hands and results_hands_list:
             self._draw_hands(display_frame, results_hands_list)
@@ -864,6 +888,114 @@ class VideoWorker:
                 self._mp_drawing_styles.get_default_hand_connections_style(),
             )
     
+    # ==================================================================
+    # SOP 輔助方法
+    # ==================================================================
+
+    def _extract_hand_centers(self, frame, results_hands_list):
+        """從 MediaPipe 手部結果取得所有手的中心點"""
+        if results_hands_list is None:
+            return []
+        h, w = frame.shape[:2]
+        centers = []
+        for hand_landmarks in results_hands_list:
+            if hand_landmarks is None:
+                continue
+            xs = [lm.x * w for lm in hand_landmarks.landmark]
+            ys = [lm.y * h for lm in hand_landmarks.landmark]
+            cx = int(sum(xs) / len(xs))
+            cy = int(sum(ys) / len(ys))
+            centers.append((cx, cy))
+        return centers
+
+    def _draw_sop_overlay(self, frame, sop_state: dict):
+        """在畫面上疊加 SOP 流程資訊"""
+        h, w = frame.shape[:2]
+
+        step = sop_state.get('current_step', 0)
+        debug_msg = sop_state.get('debug_msg', '')
+
+        # SOP 步驟定義
+        step_names = {
+            0: '等待開始',
+            1: '放入底座(A)',
+            2: '放入電路板(B)',
+            3: 'B放到A上',
+            4: '第一段鎖螺絲',
+            5: '放上蓋子(C)',
+            6: '第二段鎖螺絲',
+            7: '放到輸送帶',
+        }
+        step_label = step_names.get(step, f'Step {step}')
+
+        # 畫半透明背景
+        bg_y1 = h - 160
+        bg_y2 = h
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (0, bg_y1), (w, bg_y2), (0, 0, 0), -1)
+        cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
+
+        # 大字顯示當前步驟
+        sop_text = f"SOP Step {step}: {step_label}"
+        frame[:] = self._put_chinese_text(
+            frame, sop_text,
+            (20, bg_y1 + 15),
+            font_size=50,
+            color=(0, 255, 255),
+        )
+
+        # 小字顯示 debug 資訊
+        if debug_msg:
+            frame[:] = self._put_chinese_text(
+                frame, debug_msg,
+                (20, bg_y1 + 80),
+                font_size=30,
+                color=(200, 200, 200),
+            )
+
+        # 繪製 assembly ROI 框
+        a_roi = SOPConfig.ASSEMBLY_ROI
+        cv2.rectangle(frame, (a_roi[0], a_roi[1]), (a_roi[2], a_roi[3]),
+                      (0, 255, 0), 2)
+        frame[:] = self._put_chinese_text(
+            frame, '組裝區',
+            (a_roi[0] + 5, a_roi[1] - 30),
+            font_size=20, color=(0, 255, 0),
+        )
+
+        # 繪製 conveyor ROI 框
+        c_roi = SOPConfig.CONVEYOR_ROI
+        cv2.rectangle(frame, (c_roi[0], c_roi[1]), (c_roi[2], c_roi[3]),
+                      (255, 165, 0), 2)
+        frame[:] = self._put_chinese_text(
+            frame, '輸送帶',
+            (c_roi[0] + 5, c_roi[1] - 30),
+            font_size=20, color=(255, 165, 0),
+        )
+
+    # ==================================================================
+    # SOP 對外介面
+    # ==================================================================
+
+    def get_sop_state(self) -> Optional[dict]:
+        """取得當前 SOP 狀態（執行緒安全）"""
+        if self._sop_system is None:
+            return None
+        return self._sop_system.get_state_dict()
+
+    def drain_sop_events(self) -> list:
+        """取出並清空所有累積的 SOP 事件（執行緒安全）"""
+        with self._sop_events_lock:
+            events = self._sop_events
+            self._sop_events = []
+            return events
+
+    def get_sop_history(self) -> list:
+        """取得 SOP 歷史完成品紀錄"""
+        if self._sop_system is None:
+            return []
+        return self._sop_system.get_history()
+
     def get_latest_frame(self) -> Optional[np.ndarray]:
         """取得最新的處理後影格（執行緒安全）"""
         with self._lock:

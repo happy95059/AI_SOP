@@ -260,6 +260,70 @@ class WebRTCConfig:
 
 
 # ================================
+# SOP 流程偵測配置
+# ================================
+class SOPConfig:
+    """SOP 組裝流程偵測相關配置"""
+
+    # 是否啟用 SOP 流程偵測
+    ENABLED = True
+
+    # ---------- 類別名稱（YOLO 輸出的 class name） ----------
+    CLASS_A = "A"                  # 底座
+    CLASS_B = "B"                  # 電路板
+    CLASS_C = "C"                  # 蓋子
+    CLASS_SCREWDRIVER = "screwdriver"  # 螺絲起子
+
+    # ---------- ROI 區域座標 (x1, y1, x2, y2) ----------
+    # 組裝區 ROI
+    ASSEMBLY_ROI = (1350, 200, 2000, 1200)
+    # 輸送帶 ROI（成品放出去的區域）
+    CONVEYOR_ROI = (400, 100, 1050, 1200)
+
+    # ---------- 穩定幀數（debounce） ----------
+    # 物件在 assembly ROI 內連續偵測到幾幀才算穩定存在
+    STABLE_FRAMES_REQUIRED = 5
+    # 物件消失幾幀後才真正標記為離開
+    MISSING_FRAMES_TOLERANCE = 15
+
+    # ---------- 距離閾值（像素） ----------
+    # B 靠近 A 的距離閾值 → 判斷 B 放到 A 上
+    DIST_B_TO_A = 120
+    # C 靠近 AB 核心位置的距離閾值
+    DIST_C_TO_AB = 120
+    # 螺絲起子靠近目標物的距離閾值
+    DIST_SCREWDRIVER_TO_TARGET = 150
+    # 手靠近螺絲起子的距離閾值
+    DIST_HAND_TO_SCREWDRIVER = 200
+
+    # ---------- 螺絲起子垂直判定 ----------
+    # 螺絲起子 bbox 的 h/w 比例 > 此值視為垂直
+    SCREWDRIVER_VERTICAL_RATIO = 1.3
+
+    # ---------- 螺絲鎖附累計幀數 ----------
+    # 螺絲起子持續作用幾幀才算鎖附完成
+    SCREW_FRAMES_REQUIRED = 10
+
+    # ---------- Rollback ----------
+    # Step3 rollback: A 又單獨穩定出現的幀數
+    ROLLBACK_STEP3_FRAMES = 8
+    # Step5 rollback: B 又單獨穩定出現的幀數
+    ROLLBACK_STEP5_FRAMES = 8
+
+    # ---------- Step7: 產品離開 ----------
+    # 主體離開 assembly 且進入 conveyor 的持續幀數
+    PRODUCT_LEAVE_FRAMES = 8
+
+    # ---------- 歷史紀錄 ----------
+    # 最多保留幾件完成品紀錄
+    MAX_HISTORY = 50
+
+    # ---------- 主物件選擇策略 ----------
+    # 匹配上一幀主物件的最大距離（像素），超過就不認為是同一個
+    MAIN_OBJECT_MAX_MATCH_DIST = 200
+
+
+# ================================
 # 服务器配置
 # ================================
 class ServerConfig:

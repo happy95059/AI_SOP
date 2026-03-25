@@ -1,11 +1,12 @@
 """
 FastAPI Server - WebRTC 串流 API 伺服器
 """
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -241,6 +242,63 @@ async def handle_webrtc_offer(request: WebRTCOfferRequest):
     except Exception as e:
         logger.exception(f"處理 WebRTC offer 失敗: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ===== SOP REST API =====
+
+@app.get("/api/v1/sop/state")
+async def get_sop_state():
+    """取得當前 SOP 流程狀態"""
+    state = worker_manager.get_sop_state()
+    if state is None:
+        return {"enabled": False}
+    return {"enabled": True, **state}
+
+
+@app.get("/api/v1/sop/events")
+async def get_sop_events():
+    """取出並清空累積的 SOP 事件（polling 模式）"""
+    events = worker_manager.drain_sop_events()
+    return {"events": events}
+
+
+@app.get("/api/v1/sop/history")
+async def get_sop_history():
+    """取得 SOP 歷史完成品紀錄"""
+    history = worker_manager.get_sop_history()
+    return {"history": history}
+
+
+# ===== SOP WebSocket =====
+
+@app.websocket("/ws/sop")
+async def websocket_sop(ws: WebSocket):
+    """
+    WebSocket 端點：即時推送 SOP 狀態與事件。
+
+    每 0.5 秒推送一次：
+      - type=state_update: 當前 SOP 狀態
+      - type=step_changed / product_completed: 事件
+    """
+    await ws.accept()
+    logger.info("SOP WebSocket 已連線")
+    try:
+        while True:
+            # 推送狀態
+            state = worker_manager.get_sop_state()
+            if state is not None:
+                await ws.send_json({"type": "state_update", **state})
+
+            # 推送事件
+            events = worker_manager.drain_sop_events()
+            for evt in events:
+                await ws.send_json(evt)
+
+            await asyncio.sleep(0.5)
+    except WebSocketDisconnect:
+        logger.info("SOP WebSocket 已斷開")
+    except Exception as e:
+        logger.error(f"SOP WebSocket 錯誤: {e}")
 
 
 # ===== 啟動伺服器 =====

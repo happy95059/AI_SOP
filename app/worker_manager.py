@@ -182,6 +182,28 @@ class WorkerManager:
         if self._worker:
             return self._worker.error
         return None
+
+    # ==================================================================
+    # SOP 代理方法
+    # ==================================================================
+
+    def get_sop_state(self) -> Optional[dict]:
+        """取得當前 SOP 狀態"""
+        if self._worker:
+            return self._worker.get_sop_state()
+        return None
+
+    def drain_sop_events(self) -> list:
+        """取出並清空累積的 SOP 事件"""
+        if self._worker:
+            return self._worker.drain_sop_events()
+        return []
+
+    def get_sop_history(self) -> list:
+        """取得 SOP 歷史完成品紀錄"""
+        if self._worker:
+            return self._worker.get_sop_history()
+        return []
     
     def _start_timeout_monitor(self):
         """啟動 idle timeout 監控執行緒"""
