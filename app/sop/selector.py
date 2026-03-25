@@ -18,9 +18,9 @@ class MainObjectSelector:
     從每幀的 YOLO detections 中，為每個類別 (A/B/C/screwdriver) 挑出主實例。
 
     選擇策略：
-      1. 優先 assembly ROI 內的偵測
+      1. 只考慮 assembly ROI 內的偵測（外面不重要）
       2. 優先靠近上一幀 main object 的位置
-      3. 沒有上一幀時，選 ROI 內面積最大 or 最靠近 ROI 中心的
+      3. 沒有上一幀時，選 ROI 內面積最大的
     """
 
     def __init__(self):
@@ -69,30 +69,19 @@ class MainObjectSelector:
         if not bboxes:
             return None
 
-        # 分成 ROI 內 / ROI 外
-        in_roi = []
-        out_roi = []
-        for bbox in bboxes:
-            center = self._bbox_center(bbox)
-            if self._in_roi(center):
-                in_roi.append(bbox)
-            else:
-                out_roi.append(bbox)
-
-        candidates = in_roi if in_roi else out_roi
+        # 只考慮 assembly ROI 內的偵測，外面的世界不重要
+        in_roi = [b for b in bboxes if self._in_roi(self._bbox_center(b))]
+        if not in_roi:
+            return None
 
         # 如果有上一幀位置，優先靠近上一幀
         if prev_center is not None:
-            best = min(candidates, key=lambda b: self._dist(self._bbox_center(b), prev_center))
+            best = min(in_roi, key=lambda b: self._dist(self._bbox_center(b), prev_center))
             if self._dist(self._bbox_center(best), prev_center) <= self._max_match_dist:
                 return best
 
         # 沒有上一幀 or 距離太遠 → ROI 內面積最大
-        if in_roi:
-            return max(in_roi, key=self._bbox_area)
-
-        # 都不在 ROI 內 → 離 ROI 中心最近
-        return min(candidates, key=lambda b: self._dist(self._bbox_center(b), self._roi_center))
+        return max(in_roi, key=self._bbox_area)
 
     # ------------------------------------------------------------------
     # helpers

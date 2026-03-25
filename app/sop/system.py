@@ -44,6 +44,7 @@ class SOPSystem:
         self,
         yolo_results,
         hand_centers: Optional[List[Tuple[int, int]]] = None,
+        hand_bboxes: Optional[List[Tuple[int, int, int, int]]] = None,
     ) -> Tuple[dict, List[dict]]:
         """
         每幀呼叫一次。
@@ -74,7 +75,10 @@ class SOPSystem:
         selected = self.selector.select(detections_by_class, prev_centers)
 
         # 4. 建立 DetectionContext
-        ctx = self._build_context(selected, hand_centers or [])
+        ctx = self._build_context(
+            selected, hand_centers or [], hand_bboxes or [],
+            detections_by_class,
+        )
 
         # 5. 丟給 rule engine
         events = self.rule_engine.update(self.current_state, ctx)
@@ -135,6 +139,8 @@ class SOPSystem:
         self,
         selected: Dict[str, Optional[Tuple[int, int, int, int]]],
         hand_centers: List[Tuple[int, int]],
+        hand_bboxes: List[Tuple[int, int, int, int]],
+        detections_by_class: Dict[str, List[Tuple[int, int, int, int]]],
     ) -> DetectionContext:
         ctx = DetectionContext()
         ctx.frame_idx = self._frame_idx
@@ -156,6 +162,7 @@ class SOPSystem:
 
         # --- 手部 ---
         ctx.hand_centers = hand_centers
+        ctx.hand_bboxes = hand_bboxes
 
         # --- ROI flags ---
         assembly = CFG.ASSEMBLY_ROI
@@ -168,54 +175,98 @@ class SOPSystem:
             ctx.screwdriver_center, assembly
         )
 
-        # product_in_conveyor: 沒有任何主物件在 assembly 但有東西進 conveyor
-        # 這裡用一個簡化判斷：assembly 內沒有 A/B/C 且 conveyor 內有偵測
-        any_in_assembly = ctx.A_in_assembly or ctx.B_in_assembly or ctx.C_in_assembly
-        # 用最後已知核心位置判斷是否進了 conveyor
-        core_pos = self.current_state.ABC_pos or self.current_state.AB_pos
-        core_in_conveyor = DetectionContext._point_in_roi(core_pos, conveyor) if core_pos else False
-        # 也可以檢查是否有任一物件中心在 conveyor
-        any_in_conveyor = (
-            DetectionContext._point_in_roi(ctx.mainA_center, conveyor)
-            or DetectionContext._point_in_roi(ctx.mainB_center, conveyor)
-            or DetectionContext._point_in_roi(ctx.mainC_center, conveyor)
+        # 組裝區內的手數量（用於 ready check）
+        ctx.hands_in_assembly_count = sum(
+            1 for hc in hand_centers
+            if DetectionContext._point_in_roi(hc, assembly)
         )
-        ctx.product_in_conveyor = (not any_in_assembly) and (core_in_conveyor or any_in_conveyor)
+
+        # product_in_conveyor: 用原始偵測結果檢查 conveyor（因為 selector 只聽 assembly ROI）
+        any_in_assembly = ctx.A_in_assembly or ctx.B_in_assembly or ctx.C_in_assembly
+        any_in_conveyor_raw = False
+        for cls_name in [CFG.CLASS_A, CFG.CLASS_B, CFG.CLASS_C]:
+            for bbox in detections_by_class.get(cls_name, []):
+                c = DetectionContext._center_of_bbox(bbox)
+                if DetectionContext._point_in_roi(c, conveyor):
+                    any_in_conveyor_raw = True
+                    break
+            if any_in_conveyor_raw:
+                break
+        ctx.product_in_conveyor = (not any_in_assembly) and any_in_conveyor_raw
 
         # --- 預計算距離 ---
-        # B 到 A（用 A 的最後已知位置）
-        a_ref = ctx.mainA_center or self.current_state.mainA.center
-        ctx.dist_B_to_A = DetectionContext._dist(ctx.mainB_center, a_ref)
+        # B 到 A、C 到 AB：用中心距離
+        # screwdriver 到 target、hand 到 screwdriver：用 bbox 邊緣距離
 
-        # C 到 AB 核心位置
+        # B 到 A（A 可能被遮擋，用最後已知位置 — 中心距離）
+        a_ref_center = ctx.mainA_center or self.current_state.mainA.center
+        ctx.dist_B_to_A = DetectionContext._dist(ctx.mainB_center, a_ref_center)
+
+        # C 到 AB 核心位置（中心距離）
         ab_pos = self.current_state.AB_pos
         ctx.dist_C_to_AB = DetectionContext._dist(ctx.mainC_center, ab_pos)
 
-        # screwdriver 到目標：依步驟決定 target
-        screw_target = self._get_screw_target()
-        ctx.dist_screwdriver_to_target = DetectionContext._dist(
-            ctx.screwdriver_center, screw_target
-        )
+        # screwdriver 到目標：依步驟決定 target，用 bbox 邊緣距離（優先）或中心距離
+        screw_target_bbox, screw_target_center = self._get_screw_target()
+        if screw_target_bbox is not None:
+            # 有 bbox：用 point-to-bbox 距離
+            ctx.dist_screwdriver_to_target = DetectionContext._point_to_bbox_dist(
+                ctx.screwdriver_center, screw_target_bbox
+            )
+        else:
+            # 只有 center：用 point-to-point 距離
+            ctx.dist_screwdriver_to_target = DetectionContext._dist(
+                ctx.screwdriver_center, screw_target_center
+            )
 
-        # hand 到 screwdriver
-        ctx.dist_hand_to_screwdriver = DetectionContext._min_dist_to_list(
-            ctx.screwdriver_center, hand_centers
+        # hand 到 screwdriver：優先 bbox-to-bbox，否則 point-to-bbox
+        ctx.dist_hand_to_screwdriver = self._calc_hand_screwdriver_dist(
+            ctx.screwdriver_bbox, ctx.screwdriver_center,
+            hand_bboxes, hand_centers,
         )
 
         return ctx
 
+    @staticmethod
+    def _calc_hand_screwdriver_dist(
+        screw_bbox: Optional[Tuple[int, int, int, int]],
+        screw_center: Optional[Tuple[int, int]],
+        hand_bboxes: List[Tuple[int, int, int, int]],
+        hand_centers: List[Tuple[int, int]],
+    ) -> float:
+        """計算手到螺絲起子的最短距離（優先 bbox 邊緣距離）"""
+        # bbox-to-bbox：最精確
+        if screw_bbox is not None and hand_bboxes:
+            return min(
+                DetectionContext._bbox_to_bbox_dist(hb, screw_bbox)
+                for hb in hand_bboxes
+            )
+        # point-to-bbox：手中心到螺絲起子 bbox
+        if screw_bbox is not None and hand_centers:
+            return min(
+                DetectionContext._point_to_bbox_dist(hc, screw_bbox)
+                for hc in hand_centers
+            )
+        # fallback: center-to-center
+        return DetectionContext._min_dist_to_list(screw_center, hand_centers)
+
     # ------------------------------------------------------------------
 
-    def _get_screw_target(self) -> Optional[Tuple[int, int]]:
-        """根據當前流程步驟決定螺絲起子的比較目標位置"""
+    def _get_screw_target(self) -> Tuple[Optional[Tuple[int, int, int, int]], Optional[Tuple[int, int]]]:
+        """
+        根據當前流程步驟決定螺絲起子的比較目標位置。
+        
+        Returns:
+            (target_bbox, target_center)
+        """
         state = self.current_state
         if state.C_on_AB_candidate and not state.second_screw_done:
-            # Step6: 比較 ABC_pos 或 C 位置
-            return state.ABC_pos or state.AB_pos
+            # Step6: 比較 ABC_pos 或 C 的 bbox
+            return (state.mainC.bbox, state.ABC_pos or state.AB_pos)
         if state.AB_candidate and not state.first_screw_done:
-            # Step4: 比較 AB_pos 或 B 位置
-            return state.AB_pos or state.mainB.center
-        return None
+            # Step4: 比較 AB_pos 或 B 的 bbox
+            return (state.mainB.bbox, state.AB_pos or state.mainB.center)
+        return (None, None)
 
     # ==================================================================
     # 對外查詢

@@ -33,6 +33,13 @@ class SOPRuleEngine:
         根據 DetectionContext 更新 SOPState，回傳產生的事件列表。
         """
         events: List[dict] = []
+
+        # 先檢查就緒狀態（手 + 螺絲起子在組裝區）- 只檢查一次
+        if not state.ready and not state.ready_check_done:
+            self._check_ready(state, ctx, events)
+            state.debug_msg = self._build_debug_msg(state, ctx)
+            return events
+
         old_step = state.current_step
 
         # 先更新主物件的 seen / stable / missing 狀態
@@ -90,6 +97,29 @@ class SOPRuleEngine:
         state.debug_msg = self._build_debug_msg(state, ctx)
 
         return events
+
+    # ==================================================================
+    # Ready check: 手 + 螺絲起子在組裝區
+    # ==================================================================
+
+    def _check_ready(self, state: SOPState, ctx: DetectionContext, events: List[dict]):
+        hands_ok = ctx.hands_in_assembly_count >= CFG.READY_HANDS_REQUIRED
+        screwdriver_ok = ctx.screwdriver_in_assembly
+
+        if hands_ok and screwdriver_ok:
+            state.ready_frames += 1
+        else:
+            state.ready_frames = max(0, state.ready_frames - 1)
+
+        if state.ready_frames >= CFG.READY_FRAMES_REQUIRED:
+            state.ready = True
+            state.ready_check_done = True  # 标记已完成 ready check，不再重复检查
+            state.current_step = 0
+            events.append({
+                "type": "sop_ready",
+                "product_id": state.product_id,
+            })
+            logger.info("[SOP] Ready check 通過: 手 + 螺絲起子在組裝區，已上工")
 
     # ==================================================================
     # 主物件 seen / stable / missing 狀態
@@ -165,7 +195,7 @@ class SOPRuleEngine:
         a_pos = state.mainA.center
         if a_pos is None:
             return
-
+        logger.info(f"[SOP] Step3: A 最後位置 {a_pos}, B 位置 {ctx.mainB_center}, 距離 {ctx.dist_B_to_A:.1f}")
         if ctx.dist_B_to_A >= 0 and ctx.dist_B_to_A <= CFG.DIST_B_TO_A:
             state.step3_candidate_frames += 1
         else:
@@ -193,7 +223,8 @@ class SOPRuleEngine:
             return
 
         # A 單獨出現 = A seen 且 B 不 seen
-        if state.mainA.seen and not state.mainB.seen:
+        # if state.mainA.seen and not state.mainB.seen:
+        if state.mainA.seen:
             state.step3_rollback_frames += 1
         else:
             state.step3_rollback_frames = 0
@@ -283,8 +314,10 @@ class SOPRuleEngine:
         if not state.C_on_AB_candidate:
             return
 
-        b_alone = state.mainB.seen and not state.mainC.seen
-        c_far = ctx.dist_C_to_AB < 0 or ctx.dist_C_to_AB > CFG.DIST_C_TO_AB * 2
+        # b_alone = state.mainB.seen and not state.mainC.seen
+        # c_far = ctx.dist_C_to_AB < 0 or ctx.dist_C_to_AB > CFG.DIST_C_TO_AB * 2
+        b_alone = state.mainB.seen
+        c_far = True
 
         if b_alone and c_far:
             state.step5_rollback_frames += 1
@@ -353,6 +386,8 @@ class SOPRuleEngine:
 
     @staticmethod
     def _calc_current_step(state: SOPState) -> int:
+        if not state.ready:
+            return -1  # 等待上工
         if state.product_done:
             return 7
         if state.second_screw_done:
@@ -376,6 +411,11 @@ class SOPRuleEngine:
     @staticmethod
     def _build_debug_msg(state: SOPState, ctx: DetectionContext) -> str:
         parts = []
+        if not state.ready:
+            parts.append(f"READY? ({state.ready_frames}/{CFG.READY_FRAMES_REQUIRED})")
+            parts.append(f"Hands={ctx.hands_in_assembly_count}")
+            parts.append(f"Screw={'Y' if ctx.screwdriver_in_assembly else 'N'}")
+            return " | ".join(parts)
         parts.append(f"Step={state.current_step}")
         if state.has_A:
             parts.append("A✓")

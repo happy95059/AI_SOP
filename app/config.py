@@ -318,6 +318,12 @@ class SOPConfig:
     # 最多保留幾件完成品紀錄
     MAX_HISTORY = 50
 
+    # ---------- 啟動就緒檢查 ----------
+    # 需要幾隻手在組裝區才算就緒
+    READY_HANDS_REQUIRED = 2
+    # 就緒條件（手 + 螺絲起子在組裝區）需持續幾幀
+    READY_FRAMES_REQUIRED = 5
+
     # ---------- 主物件選擇策略 ----------
     # 匹配上一幀主物件的最大距離（像素），超過就不認為是同一個
     MAIN_OBJECT_MAX_MATCH_DIST = 200
@@ -331,7 +337,7 @@ class ServerConfig:
     
     # 服务器地址
     HOST = "0.0.0.0"
-    PORT = 8000
+    PORT = 8020
     
     # CORS 配置
     ALLOW_ORIGINS = ["*"]  # 允许的来源（生产环境应限制）

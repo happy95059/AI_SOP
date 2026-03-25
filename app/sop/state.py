@@ -47,8 +47,13 @@ class SOPState:
         self.product_id: str = uuid.uuid4().hex[:8]
         self.created_at: float = time.time()
 
-        # 當前步驟 (0=未開始, 1~7)
-        self.current_step: int = 0
+        # 就緒狀態（手 + 螺絲起子在組裝區）
+        self.ready: bool = False
+        self.ready_frames: int = 0
+        self.ready_check_done: bool = False  # 只判斷一次上工，完成後不再重複檢查
+
+        # 當前步驟 (-1=等待上工, 0=已上工但未開始, 1~7=流程步驟)
+        self.current_step: int = -1
 
         # --- 主物件追蹤 ---
         self.mainA = ObjectState()
@@ -93,7 +98,9 @@ class SOPState:
     def to_dict(self) -> dict:
         """轉換為可序列化的 dict（供 WebSocket / API 使用）"""
         return {
+            "enabled": True,  # 標記 worker 正在運行
             "product_id": self.product_id,
+            "ready": self.ready,
             "current_step": self.current_step,
             "has_A": self.has_A,
             "has_B": self.has_B,

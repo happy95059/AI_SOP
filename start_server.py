@@ -27,8 +27,8 @@ if __name__ == "__main__":
     print("TH_IPCAM_DEMO - WebRTC 串流 API Server")
     print("=" * 60)
     print(f"RTSP URL: {os.environ['RTSP_URL']}")
-    print(f"API Server: http://0.0.0.0:8020")
-    print(f"API 文件: http://0.0.0.0:8020/docs")
+    print(f"API Server: http://0.0.0.0:{config.ServerConfig.PORT}")
+    print(f"API 文件: http://0.0.0.0:{config.ServerConfig.PORT}/docs")
     print(f"網頁測試: 開啟 webrtc_viewer.html")
     print("=" * 60)
     print()
@@ -37,7 +37,7 @@ if __name__ == "__main__":
     uvicorn.run(
         "app.server:app",
         host="0.0.0.0",
-        port=8020,
+        port=config.ServerConfig.PORT,
         reload=False,
         log_level="info",
     )

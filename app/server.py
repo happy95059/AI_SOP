@@ -287,7 +287,19 @@ async def websocket_sop(ws: WebSocket):
             # 推送狀態
             state = worker_manager.get_sop_state()
             if state is not None:
-                await ws.send_json({"type": "state_update", **state})
+                # Worker 運行中，state.to_dict() 已包含 enabled=True
+                await ws.send_json({"type": "state_update", "state": state})
+            else:
+                # Worker 未運行，發送空狀態
+                await ws.send_json({
+                    "type": "state_update", 
+                    "state": {
+                        "enabled": False,
+                        "current_step": -1,
+                        "ready": False,
+                        "debug_msg": "Worker 未啟動"
+                    }
+                })
 
             # 推送事件
             events = worker_manager.drain_sop_events()

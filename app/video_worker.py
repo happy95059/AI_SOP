@@ -526,9 +526,9 @@ class VideoWorker:
         
         # SOP 流程偵測
         if self._sop_system is not None:
-            hand_centers = self._extract_hand_centers(frame, results_hands_list)
+            hand_centers, hand_bboxes = self._extract_hand_data(frame, results_hands_list)
             sop_state, sop_events = self._sop_system.process_frame(
-                results_yolo, hand_centers
+                results_yolo, hand_centers, hand_bboxes
             )
             # 儲存事件供外部消費
             if sop_events:
@@ -892,12 +892,13 @@ class VideoWorker:
     # SOP 輔助方法
     # ==================================================================
 
-    def _extract_hand_centers(self, frame, results_hands_list):
-        """從 MediaPipe 手部結果取得所有手的中心點"""
+    def _extract_hand_data(self, frame, results_hands_list):
+        """從 MediaPipe 手部結果取得所有手的中心點和 bbox"""
         if results_hands_list is None:
-            return []
+            return [], []
         h, w = frame.shape[:2]
         centers = []
+        bboxes = []
         for hand_landmarks in results_hands_list:
             if hand_landmarks is None:
                 continue
@@ -906,7 +907,8 @@ class VideoWorker:
             cx = int(sum(xs) / len(xs))
             cy = int(sum(ys) / len(ys))
             centers.append((cx, cy))
-        return centers
+            bboxes.append((int(min(xs)), int(min(ys)), int(max(xs)), int(max(ys))))
+        return centers, bboxes
 
     def _draw_sop_overlay(self, frame, sop_state: dict):
         """在畫面上疊加 SOP 流程資訊"""
@@ -917,6 +919,7 @@ class VideoWorker:
 
         # SOP 步驟定義
         step_names = {
+            -1: '等待上工',
             0: '等待開始',
             1: '放入底座(A)',
             2: '放入電路板(B)',
