@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TH IPCAM Demo - WebRTC Viewer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            padding: 30px;
+            max-width: 1200px;
+            width: 100%;
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+        
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+        
+        .video-container {
+            position: relative;
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 20px;
+            aspect-ratio: 16 / 9;
+        }
+        
+        #video {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+        
+        .placeholder {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #999;
+            font-size: 18px;
+            text-align: center;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            flex: 1;
+            min-width: 120px;
+        }
+        
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+        
+        .btn-primary:hover:not(:disabled) {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn-danger {
+            background: #f56565;
+            color: white;
+        }
+        
+        .btn-danger:hover:not(:disabled) {
+            background: #e53e3e;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(245, 101, 101, 0.4);
+        }
+        
+        .btn-secondary {
+            background: #48bb78;
+            color: white;
+        }
+        
+        .btn-secondary:hover:not(:disabled) {
+            background: #38a169;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(72, 187, 120, 0.4);
+        }
+        
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .status {
+            background: #f7fafc;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+        
+        .status-item {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .status-label {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 5px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .status-value {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .status-value.active {
+            color: #48bb78;
+        }
+        
+        .status-value.inactive {
+            color: #f56565;
+        }
+        
+        .log {
+            background: #2d3748;
+            color: #e2e8f0;
+            border-radius: 8px;
+            padding: 15px;
+            font-family: "Courier New", monospace;
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        .log-entry {
+            margin-bottom: 5px;
+            display: flex;
+            gap: 10px;
+        }
+        
+        .log-time {
+            color: #90cdf4;
+        }
+        
+        .log-level {
+            font-weight: bold;
+        }
+        
+        .log-level.info {
+            color: #48bb78;
+        }
+        
+        .log-level.error {
+            color: #f56565;
+        }
+        
+        .log-level.warn {
+            color: #ed8936;
+        }
+        
+        .settings {
+            background: #f7fafc;
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+        
+        .settings h3 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 16px;
+        }
+        
+        .setting-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        
+        .setting-item:last-child {
+            border-bottom: none;
+        }
+        
+        .setting-label {
+            font-size: 14px;
+            color: #4a5568;
+        }
+        
+        input[type="text"] {
+            padding: 8px 12px;
+            border: 1px solid #cbd5e0;
+            border-radius: 4px;
+            font-size: 14px;
+            width: 400px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎥 TH IPCAM Demo - WebRTC Viewer</h1>
+        <p class="subtitle">產線工作站影像識別即時串流</p>
+        
+        <div class="video-container">
+            <video id="video" autoplay playsinline muted></video>
+            <div class="placeholder" id="placeholder">
+                點擊「開始串流」以連接影像
+            </div>
+        </div>
+        
+        <div class="controls">
+            <button class="btn-primary" id="startBtn" onclick="startStream()">
+                ▶ 開始串流
+            </button>
+            <button class="btn-danger" id="stopBtn" onclick="stopStream()" disabled>
+                ⏹ 停止串流
+            </button>
+            <button class="btn-secondary" id="statusBtn" onclick="updateStatus()">
+                🔄 更新狀態
+            </button>
+        </div>
+        
+        <div class="status">
+            <div class="status-grid">
+                <div class="status-item">
+                    <span class="status-label">連線狀態</span>
+                    <span class="status-value" id="connectionStatus">未連線</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Worker 狀態</span>
+                    <span class="status-value" id="workerStatus">-</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">觀看人數</span>
+                    <span class="status-value" id="viewerCount">-</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">閒置時間</span>
+                    <span class="status-value" id="idleTime">-</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="log" id="log"></div>
+        
+        <div class="settings">
+            <h3>⚙️ 伺服器設定</h3>
+            <div class="setting-item">
+                <span class="setting-label">API Server URL:</span>
+                <input type="text" id="apiUrl" value="http://192.168.0.156:8000">
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let pc = null;
+        let apiUrl = 'http://192.168.0.156:8000';
+        
+        // 初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            const urlInput = document.getElementById('apiUrl');
+            urlInput.addEventListener('change', () => {
+                apiUrl = urlInput.value;
+                log('info', `API URL 已更新: ${apiUrl}`);
+            });
+            
+            log('info', '頁面已載入，準備就緒');
+            updateStatus();
+        });
+        
+        // 日誌函式
+        function log(level, message) {
+            const logDiv = document.getElementById('log');
+            const now = new Date();
+            const time = now.toLocaleTimeString('zh-TW');
+            
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.innerHTML = `
+                <span class="log-time">[${time}]</span>
+                <span class="log-level ${level}">[${level.toUpperCase()}]</span>
+                <span>${message}</span>
+            `;
+            
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+        
+        // 開始串流
+        async function startStream() {
+            try {
+                log('info', '正在建立 WebRTC 連線...');
+                document.getElementById('startBtn').disabled = true;
+                document.getElementById('placeholder').style.display = 'none';
+                
+                // 步驟 1: 先啟動 session（確保 worker 正在運行）
+                log('info', '步驟 1/4: 啟動 session...');
+                try {
+                    const startResponse = await fetch(`${apiUrl}/api/v1/session/start`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            use_pose: false,
+                            use_hands: true,
+                            use_yolo: true
+                        })
+                    });
+                    
+                    if (!startResponse.ok) {
+                        const errorText = await startResponse.text();
+                        throw new Error(`啟動 session 失敗 (HTTP ${startResponse.status}): ${errorText}`);
+                    }
+                    
+                    const startResult = await startResponse.json();
+                    log('info', `✅ Session 已啟動: ${startResult.message}`);
+                } catch (error) {
+                    log('warn', `啟動 session 時發生錯誤: ${error.message}`);
+                    log('info', '繼續嘗試建立 WebRTC 連線（後端會自動啟動 worker）...');
+                }
+                
+                // 步驟 2: 建立 RTCPeerConnection
+                log('info', '步驟 2/4: 建立 RTCPeerConnection...');
+                pc = new RTCPeerConnection({
+                    // 內網環境不需要 STUN server，使用 host candidate 直接連接
+                    iceServers: []
+                });
+                
+                // 監聽連線狀態
+                pc.onconnectionstatechange = () => {
+                    log('info', `WebRTC 連線狀態: ${pc.connectionState}`);
+                    updateConnectionStatus(pc.connectionState);
+                    
+                    // 如果連線成功
+                    if (pc.connectionState === 'connected') {
+                        log('info', '✅ WebRTC 連線成功，應該可以看到影像了');
+                    }
+                    
+                    // 如果連線失敗，自動清理
+                    if (pc.connectionState === 'failed') {
+                        log('error', '❌ WebRTC 連線失敗');
+                        log('error', `ICE 連線狀態: ${pc.iceConnectionState}`);
+                        log('error', `ICE gathering 狀態: ${pc.iceGatheringState}`);
+                        setTimeout(() => {
+                            if (pc && pc.connectionState === 'failed') {
+                                log('info', '3秒後自動清理失敗的連線...');
+                                stopStream();
+                            }
+                        }, 3000);
+                    }
+                    
+                    if (pc.connectionState === 'disconnected') {
+                        log('warn', '⚠️  WebRTC 連線已斷開');
+                        setTimeout(() => {
+                            if (pc && pc.connectionState === 'disconnected') {
+                                log('info', '3秒後自動清理斷開的連線...');
+                                stopStream();
+                            }
+                        }, 3000);
+                    }
+                };
+                
+                // 監聽 ICE 連線狀態
+                pc.oniceconnectionstatechange = () => {
+                    log('info', `ICE 連線狀態: ${pc.iceConnectionState}`);
+                    if (pc.iceConnectionState === 'failed') {
+                        log('error', '❌ ICE 連線失敗（網路協商失敗）');
+                        log('error', '可能原因:');
+                        log('error', '  1. 防火墻阻擋 UDP 端口');
+                        log('error', '  2. 網路不通');
+                        log('error', '  3. 服務器未正確啟動');
+                    } else if (pc.iceConnectionState === 'connected') {
+                        log('info', '✅ ICE 連線成功');
+                    } else if (pc.iceConnectionState === 'checking') {
+                        log('info', 'ICE 正在檢查連線...');
+                    }
+                };
+                
+                // 監聽 ICE gathering 狀態
+                pc.onicegatheringstatechange = () => {
+                    log('info', `ICE gathering 狀態: ${pc.iceGatheringState}`);
+                };
+                
+                // 處理接收到的 track
+                pc.ontrack = (event) => {
+                    log('info', '✅ 收到影像串流 track');
+                    const video = document.getElementById('video');
+                    if (event.streams && event.streams[0]) {
+                        video.srcObject = event.streams[0];
+                        log('info', '影像已綁定到 video 元素');
+                    } else {
+                        log('warn', 'Track 沒有 stream，手動建立...');
+                        const stream = new MediaStream([event.track]);
+                        video.srcObject = stream;
+                    }
+                };
+                
+                // 添加 transceiver 以接收視訊
+                log('info', '添加 video transceiver (recvonly)...');
+                pc.addTransceiver('video', { direction: 'recvonly' });
+                
+                // 步驟 3: 建立並發送 offer
+                log('info', '步驟 3/4: 建立 WebRTC offer...');
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                log('info', `Offer 已建立 (${offer.type})`);
+                
+                // 設置 ICE candidate 監聽（用於日誌和調試）
+                let candidateCount = 0;
+                pc.onicecandidate = (e) => {
+                    if (e.candidate) {
+                        candidateCount++;
+                        log('info', `收到 ICE candidate #${candidateCount}: ${e.candidate.type} ${e.candidate.protocol || ''} ${e.candidate.address || 'N/A'}`);
+                    } else {
+                        log('info', `ICE gathering 完成（共 ${candidateCount} 個 candidates）`);
+                    }
+                };
+                
+                // 內網環境：等待一下讓至少有一些 candidates（最多1秒，非阻塞）
+                log('info', '等待初始 ICE candidates（最多1秒）...');
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                // 發送 offer 到後端
+                log('info', `步驟 4/4: 發送 offer 到 ${apiUrl}/api/v1/webrtc/offer`);
+                log('info', `當前 ICE gathering 狀態: ${pc.iceGatheringState}`);
+                
+                const response = await fetch(`${apiUrl}/api/v1/webrtc/offer`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sdp: pc.localDescription.sdp,
+                        type: pc.localDescription.type
+                    })
+                });
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    log('error', `後端回應錯誤 (HTTP ${response.status})`);
+                    log('error', `錯誤內容: ${errorText}`);
+                    throw new Error(`後端回應錯誤 (HTTP ${response.status}): ${errorText}`);
+                }
+                
+                const answer = await response.json();
+                log('info', `✅ 收到 answer (${answer.type})`);
+                
+                // 設定 remote description (answer)
+                log('info', '設定 remote description...');
+                await pc.setRemoteDescription(new RTCSessionDescription(answer));
+                log('info', '✅ Remote description 已設定');
+                
+                log('info', '等待 ICE 連線建立...');
+                log('info', `當前連線狀態: ${pc.connectionState}`);
+                log('info', `當前 ICE 狀態: ${pc.iceConnectionState}`);
+                
+                document.getElementById('stopBtn').disabled = false;
+                
+                // 定期更新狀態
+                startStatusUpdates();
+                
+            } catch (error) {
+                log('error', `❌ 連線失敗: ${error.message}`);
+                log('error', `錯誤類型: ${error.name}`);
+                if (error.stack) {
+                    console.error('完整錯誤堆疊:', error.stack);
+                    log('error', '（完整錯誤已輸出到控制台）');
+                }
+                
+                document.getElementById('startBtn').disabled = false;
+                document.getElementById('placeholder').style.display = 'block';
+                
+                if (pc) {
+                    log('info', '清理 RTCPeerConnection...');
+                    try {
+                        pc.close();
+                    } catch (e) {
+                        log('error', `關閉連線時出錯: ${e.message}`);
+                    }
+                    pc = null;
+                }
+            }
+        }
+        
+        // 停止串流
+        async function stopStream() {
+            try {
+                log('info', '正在關閉連線...');
+                
+                if (pc) {
+                    pc.close();
+                    pc = null;
+                }
+                
+                const video = document.getElementById('video');
+                video.srcObject = null;
+                
+                document.getElementById('startBtn').disabled = false;
+                document.getElementById('stopBtn').disabled = true;
+                document.getElementById('placeholder').style.display = 'block';
+                
+                updateConnectionStatus('closed');
+                log('info', '✅ 連線已關閉');
+                
+                stopStatusUpdates();
+                
+            } catch (error) {
+                log('error', `關閉連線失敗: ${error.message}`);
+                console.error(error);
+            }
+        }
+        
+        // 更新連線狀態顯示
+        function updateConnectionStatus(state) {
+            const statusEl = document.getElementById('connectionStatus');
+            
+            const statusMap = {
+                'new': '初始化',
+                'connecting': '連線中',
+                'connected': '已連線',
+                'disconnected': '已斷線',
+                'failed': '失敗',
+                'closed': '已關閉'
+            };
+            
+            statusEl.textContent = statusMap[state] || state;
+            
+            if (state === 'connected') {
+                statusEl.className = 'status-value active';
+            } else if (state === 'failed' || state === 'disconnected') {
+                statusEl.className = 'status-value inactive';
+            } else {
+                statusEl.className = 'status-value';
+            }
+        }
+        
+        // 更新 session 狀態
+        async function updateStatus() {
+            try {
+                const response = await fetch(`${apiUrl}/api/v1/session/status`);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const status = await response.json();
+                
+                // 更新顯示
+                const workerStatus = document.getElementById('workerStatus');
+                workerStatus.textContent = status.worker_running ? '執行中' : '已停止';
+                workerStatus.className = status.worker_running ? 'status-value active' : 'status-value inactive';
+                
+                document.getElementById('viewerCount').textContent = status.viewer_count;
+                
+                const idleSeconds = status.idle_seconds;
+                if (idleSeconds > 0) {
+                    const minutes = Math.floor(idleSeconds / 60);
+                    const seconds = idleSeconds % 60;
+                    document.getElementById('idleTime').textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                } else {
+                    document.getElementById('idleTime').textContent = '無';
+                }
+                
+            } catch (error) {
+                log('error', `更新狀態失敗: ${error.message}`);
+            }
+        }
+        
+        // 定期更新狀態
+        let statusInterval = null;
+        
+        function startStatusUpdates() {
+            if (statusInterval) return;
+            statusInterval = setInterval(updateStatus, 2000);
+        }
+        
+        function stopStatusUpdates() {
+            if (statusInterval) {
+                clearInterval(statusInterval);
+                statusInterval = null;
+            }
+        }
+    </script>
+</body>
+</html>
